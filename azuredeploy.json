@@ -1,0 +1,196 @@
+﻿{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "armlinuxvmType": {
+            "type": "string",
+            "defaultValue": "Standard_LRS",
+            "allowedValues": [
+                "Standard_LRS",
+                "Standard_ZRS",
+                "Standard_GRS",
+                "Standard_RAGRS",
+                "Premium_LRS"
+            ]
+        },
+        "linuxvmName": {
+            "type": "string",
+            "minLength": 1
+        },
+        "linuxvmAdminUserName": {
+            "type": "string",
+            "minLength": 1
+        },
+        "linuxvmAdminPassword": {
+            "type": "securestring"
+        },
+        "linuxvmUbuntuOSVersion": {
+            "type": "string",
+            "defaultValue": "14.04.2-LTS",
+            "allowedValues": [
+                "12.04.5-LTS",
+                "14.04.2-LTS"
+            ]
+        },
+        "linuxPIPDnsName": {
+            "type": "string",
+            "minLength": 1
+        }
+    },
+    "variables": {
+        "armlinuxvmName": "[concat('armlinuxvm', uniqueString(resourceGroup().id))]",
+        "armlinuxvnetPrefix": "10.0.0.0/16",
+        "armlinuxvnetSubnet1Name": "Subnet-1",
+        "armlinuxvnetSubnet1Prefix": "10.0.0.0/24",
+        "armlinuxvnetSubnet2Name": "Subnet-2",
+        "armlinuxvnetSubnet2Prefix": "10.0.1.0/24",
+        "linuxvmImagePublisher": "Canonical",
+        "linuxvmImageOffer": "UbuntuServer",
+        "linuxvmOSDiskName": "linuxvmOSDisk",
+        "linuxvmVmSize": "Standard_D1",
+        "linuxvmVnetID": "[resourceId('Microsoft.Network/virtualNetworks', 'armlinuxvnet')]",
+        "linuxvmSubnetRef": "[concat(variables('linuxvmVnetID'), '/subnets/', variables('armlinuxvnetSubnet1Name'))]",
+        "linuxvmStorageAccountContainerName": "vhds",
+        "linuxvmNicName": "[concat(parameters('linuxvmName'), 'NetworkInterface')]",
+        "linuxPIPName": "linuxPIP"
+    },
+    "resources": [
+        {
+            "name": "[variables('armlinuxvmName')]",
+            "type": "Microsoft.Storage/storageAccounts",
+            "location": "[resourceGroup().location]",
+            "apiVersion": "2015-06-15",
+            "dependsOn": [ ],
+            "tags": {
+                "displayName": "armlinuxvm"
+            },
+            "properties": {
+                "accountType": "[parameters('armlinuxvmType')]"
+            }
+        },
+        {
+            "name": "armlinuxvnet",
+            "type": "Microsoft.Network/virtualNetworks",
+            "location": "[resourceGroup().location]",
+            "apiVersion": "2015-06-15",
+            "dependsOn": [ ],
+            "tags": {
+                "displayName": "armlinuxvnet"
+            },
+            "properties": {
+                "addressSpace": {
+                    "addressPrefixes": [
+                        "[variables('armlinuxvnetPrefix')]"
+                    ]
+                },
+                "subnets": [
+                    {
+                        "name": "[variables('armlinuxvnetSubnet1Name')]",
+                        "properties": {
+                            "addressPrefix": "[variables('armlinuxvnetSubnet1Prefix')]"
+                        }
+                    },
+                    {
+                        "name": "[variables('armlinuxvnetSubnet2Name')]",
+                        "properties": {
+                            "addressPrefix": "[variables('armlinuxvnetSubnet2Prefix')]"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "name": "[variables('linuxvmNicName')]",
+            "type": "Microsoft.Network/networkInterfaces",
+            "location": "[resourceGroup().location]",
+            "apiVersion": "2015-06-15",
+            "dependsOn": [
+                "[concat('Microsoft.Network/virtualNetworks/', 'armlinuxvnet')]",
+                "[concat('Microsoft.Network/publicIPAddresses/', variables('linuxPIPName'))]"
+            ],
+            "tags": {
+                "displayName": "linuxvmNic"
+            },
+            "properties": {
+                "ipConfigurations": [
+                    {
+                        "name": "ipconfig1",
+                        "properties": {
+                            "privateIPAllocationMethod": "Dynamic",
+                            "subnet": {
+                                "id": "[variables('linuxvmSubnetRef')]"
+                            },
+                            "publicIPAddress": {
+                                "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('linuxPIPName'))]"
+                            }
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "name": "[parameters('linuxvmName')]",
+            "type": "Microsoft.Compute/virtualMachines",
+            "location": "[resourceGroup().location]",
+            "apiVersion": "2015-06-15",
+            "dependsOn": [
+                "[concat('Microsoft.Storage/storageAccounts/', variables('armlinuxvmName'))]",
+                "[concat('Microsoft.Network/networkInterfaces/', variables('linuxvmNicName'))]"
+            ],
+            "tags": {
+                "displayName": "linuxvm"
+            },
+            "properties": {
+                "hardwareProfile": {
+                    "vmSize": "[variables('linuxvmVmSize')]"
+                },
+                "osProfile": {
+                    "computerName": "[parameters('linuxvmName')]",
+                    "adminUsername": "[parameters('linuxvmAdminUsername')]",
+                    "adminPassword": "[parameters('linuxvmAdminPassword')]"
+                },
+                "storageProfile": {
+                    "imageReference": {
+                        "publisher": "[variables('linuxvmImagePublisher')]",
+                        "offer": "[variables('linuxvmImageOffer')]",
+                        "sku": "[parameters('linuxvmUbuntuOSVersion')]",
+                        "version": "latest"
+                    },
+                    "osDisk": {
+                        "name": "linuxvmOSDisk",
+                        "vhd": {
+                            "uri": "[concat('https://', variables('armlinuxvmName'), '.blob.core.windows.net/', variables('linuxvmStorageAccountContainerName'), '/', variables('linuxvmOSDiskName'), '.vhd')]"
+                        },
+                        "caching": "ReadWrite",
+                        "createOption": "FromImage"
+                    }
+                },
+                "networkProfile": {
+                    "networkInterfaces": [
+                        {
+                            "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('linuxvmNicName'))]"
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "name": "[variables('linuxPIPName')]",
+            "type": "Microsoft.Network/publicIPAddresses",
+            "location": "[resourceGroup().location]",
+            "apiVersion": "2015-06-15",
+            "dependsOn": [ ],
+            "tags": {
+                "displayName": "linuxPIP"
+            },
+            "properties": {
+                "publicIPAllocationMethod": "Dynamic",
+                "dnsSettings": {
+                    "domainNameLabel": "[parameters('linuxPIPDnsName')]"
+                }
+            }
+        }
+    ],
+    "outputs": {
+    }
+}
